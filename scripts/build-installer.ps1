@@ -20,7 +20,7 @@ try {
 
     $buildSucceeded = $false
     for ($attempt = 1; $attempt -le 3; $attempt += 1) {
-        & $builder --win $Target --x64
+        & $builder --win $Target --x64 --publish never
         if ($LASTEXITCODE -eq 0) {
             $buildSucceeded = $true
             break

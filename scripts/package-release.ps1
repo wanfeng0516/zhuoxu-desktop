@@ -4,6 +4,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-Sha256 {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseRoot = [IO.Path]::GetFullPath($ReleaseDirectory)
 $expectedReleaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'release'))
@@ -44,7 +58,7 @@ Compress-Archive -LiteralPath $installerPath -DestinationPath $archivePath -Comp
 
 $artifacts = @($installerPath, $archivePath)
 $checksumLines = foreach ($artifact in $artifacts) {
-    $hash = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-Sha256 -Path $artifact
     "$hash  $([IO.Path]::GetFileName($artifact))"
 }
 [IO.File]::WriteAllLines($checksumPath, $checksumLines, [Text.UTF8Encoding]::new($false))
@@ -54,6 +68,6 @@ $artifacts + $checksumPath | ForEach-Object {
     [pscustomobject]@{
         Name = $item.Name
         Bytes = $item.Length
-        SHA256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        SHA256 = Get-Sha256 -Path $item.FullName
     }
 } | Format-Table -AutoSize

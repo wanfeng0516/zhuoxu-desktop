@@ -1,5 +1,19 @@
 $ErrorActionPreference = 'Stop'
 
+function Get-Sha256 {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
+}
+
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $releaseRoot = Join-Path $projectRoot 'release'
 $package = Get-Content -Raw -Encoding UTF8 (Join-Path $projectRoot 'package.json') | ConvertFrom-Json
@@ -25,7 +39,7 @@ foreach ($line in Get-Content -Encoding UTF8 $checksumPath) {
 }
 foreach ($artifactPath in @($installerPath, $archivePath)) {
     $artifactName = [IO.Path]::GetFileName($artifactPath)
-    $actualHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualHash = Get-Sha256 -Path $artifactPath
     if ($expectedHashes[$artifactName] -ne $actualHash) {
         throw "SHA-256 mismatch for $artifactName"
     }
@@ -58,8 +72,8 @@ try {
         throw "The ZIP does not contain $installerName"
     }
 
-    $sourceHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash
-    $extractedHash = (Get-FileHash -LiteralPath $extractedInstaller -Algorithm SHA256).Hash
+    $sourceHash = Get-Sha256 -Path $installerPath
+    $extractedHash = Get-Sha256 -Path $extractedInstaller
     if ($sourceHash -ne $extractedHash) { throw 'The installer changed after ZIP extraction.' }
 
     $installProcess = Start-Process -FilePath $extractedInstaller -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru -WindowStyle Hidden
