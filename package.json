@@ -1,0 +1,77 @@
+{
+  "name": "zhuoxu-desktop",
+  "version": "0.1.1",
+  "description": "桌序 - Windows 桌面图标整理客户端",
+  "main": "main.js",
+  "author": "ZhuoXu contributors",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node --check lib/windows-desktop.js && node --check src/renderer.js",
+    "dist": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target nsis",
+    "dist:portable": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target portable",
+    "release:prepare": "npm run dist && powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/package-release.ps1",
+    "release:verify": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-release.ps1"
+  },
+  "dependencies": {
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "cn.zhuoxu.desktop",
+    "productName": "桌序",
+    "copyright": "Copyright © 2026 ZhuoXu contributors",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**/*",
+      "scripts/desktop-layout.ps1",
+      "scripts/extract-icons.ps1",
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "scripts/desktop-layout.ps1",
+      "scripts/extract-icons.ps1"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/app-icon.png",
+      "executableName": "ZhuoXu",
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "artifactName": "ZhuoXu-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "桌序",
+      "uninstallDisplayName": "桌序",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "menuCategory": false
+    },
+    "portable": {
+      "artifactName": "ZhuoXu-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

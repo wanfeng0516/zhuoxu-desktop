@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
+  <title>桌序</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="../assets/app-icon.png" alt="" class="brand-mark">
+        <div>
+          <strong>桌序</strong>
+          <span>ZHUOXU</span>
+        </div>
+      </div>
+
+      <nav class="primary-nav" aria-label="主导航">
+        <button class="nav-item is-active" data-view="organize" type="button">
+          <i data-lucide="layout-dashboard"></i><span>桌面整理</span>
+        </button>
+        <button class="nav-item" data-view="library" type="button">
+          <i data-lucide="blocks"></i><span>应用管理</span>
+        </button>
+        <button class="nav-item" data-view="settings" type="button">
+          <i data-lucide="settings-2"></i><span>接口设置</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="service-state">
+          <span class="state-dot" id="desktopStateDot"></span>
+          <div>
+            <strong id="desktopStateLabel">正在连接</strong>
+            <span>Windows 桌面服务</span>
+          </div>
+        </div>
+        <div class="version">桌序 1.0</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section class="view is-active" data-view-panel="organize">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">DESKTOP ORDER</p>
+            <h1>让图标各归其位</h1>
+          </div>
+          <div class="header-actions">
+            <span class="source-badge" id="sourceBadge"><i data-lucide="cpu"></i><span>本地分类</span></span>
+            <button class="icon-button" id="refreshButton" type="button" aria-label="重新扫描桌面" title="重新扫描桌面">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+        </header>
+
+        <div class="notice is-hidden" id="desktopNotice">
+          <i data-lucide="triangle-alert"></i>
+          <span id="desktopNoticeText"></span>
+        </div>
+
+        <div class="organize-grid">
+          <section class="preview-section" aria-labelledby="previewTitle">
+            <div class="section-heading">
+              <div>
+                <span class="section-kicker">实时预览</span>
+                <h2 id="previewTitle">桌面布局</h2>
+              </div>
+              <div class="summary-metrics">
+                <div><strong id="iconCount">0</strong><span>个图标</span></div>
+                <div><strong id="categoryCount">0</strong><span>个分类</span></div>
+              </div>
+            </div>
+
+            <div class="desktop-frame">
+              <div class="desktop-topbar">
+                <span>我的桌面</span>
+                <div class="window-dots"><span></span><span></span><span></span></div>
+              </div>
+              <div class="desktop-preview" id="desktopPreview" aria-label="桌面图标布局预览">
+                <div class="preview-loading" id="previewLoading">
+                  <span class="loading-mark"></span>
+                  <span>正在读取桌面</span>
+                </div>
+              </div>
+              <div class="desktop-taskbar">
+                <img src="../assets/app-icon.png" alt="">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+
+            <div class="category-strip" id="categoryStrip" aria-label="分类图例"></div>
+          </section>
+
+          <aside class="control-panel">
+            <div class="control-heading">
+              <span class="step-number">01</span>
+              <div><span>排列方向</span><strong>选择布局</strong></div>
+            </div>
+            <div class="segmented-control" role="group" aria-label="排列方式">
+              <button class="segment is-active" type="button" data-mode="left">
+                <i data-lucide="align-start-vertical"></i>
+                <span><strong>全部靠左</strong><small>纵向依次排列</small></span>
+              </button>
+              <button class="segment" type="button" data-mode="horizontal">
+                <i data-lucide="rows-3"></i>
+                <span><strong>横向分组</strong><small>同类排成一行</small></span>
+              </button>
+            </div>
+
+            <div class="control-heading size-heading">
+              <span class="step-number">02</span>
+              <div><span>屏幕适配</span><strong>图标尺寸</strong></div>
+              <output class="size-output" id="iconSizeValue" for="iconSizeSlider">48 px</output>
+            </div>
+            <div class="icon-size-control">
+              <i data-lucide="minimize-2" aria-hidden="true"></i>
+              <input id="iconSizeSlider" type="range" min="32" max="96" step="1" value="48" aria-label="桌面图标尺寸">
+              <i data-lucide="maximize-2" aria-hidden="true"></i>
+              <div class="screen-readout" title="当前显示器尺寸">
+                <i data-lucide="monitor"></i>
+                <span id="screenResolution">正在读取</span>
+                <small id="screenScale"></small>
+              </div>
+            </div>
+
+            <div class="control-heading order-heading">
+              <span class="step-number">03</span>
+              <div><span>分类顺序</span><strong>拖动调整</strong></div>
+              <div class="manual-controls">
+                <span class="manual-badge is-hidden" id="manualCountBadge"><i data-lucide="hand"></i><span>0</span></span>
+                <button class="icon-button mini" id="resetCategoriesButton" type="button" title="重置手动分类" aria-label="重置手动分类" disabled>
+                  <i data-lucide="rotate-ccw"></i>
+                </button>
+              </div>
+            </div>
+            <div class="category-order" id="categoryOrder"></div>
+
+            <div class="control-actions">
+              <button class="primary-button" id="arrangeButton" type="button">
+                <i data-lucide="wand-sparkles"></i><span>整理当前桌面</span>
+              </button>
+              <button class="secondary-button" id="undoButton" type="button" disabled>
+                <i data-lucide="undo-2"></i><span id="undoLabel">撤销</span>
+              </button>
+            </div>
+            <div class="history-note">
+              <i data-lucide="history"></i>
+              <span id="historyNote">暂无布局备份</span>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="library">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">APPLICATION LIBRARY</p>
+            <h1>应用管理</h1>
+          </div>
+          <button class="secondary-button compact" id="rescanAppsButton" type="button">
+            <i data-lucide="scan-search"></i><span>重新扫描</span>
+          </button>
+        </header>
+
+        <div class="library-toolbar">
+          <div class="search-field">
+            <i data-lucide="search"></i>
+            <input id="librarySearch" type="search" placeholder="搜索应用或桌面项目" autocomplete="off">
+            <kbd id="searchCount">0</kbd>
+          </div>
+          <div class="library-legend">
+            <span><i class="legend-dot desktop"></i>当前桌面</span>
+            <i data-lucide="arrow-right"></i>
+            <span><i class="legend-dot available"></i>可添加应用</span>
+          </div>
+        </div>
+
+        <div class="library-grid">
+          <section class="library-pane">
+            <div class="pane-heading">
+              <div><span class="pane-index">A</span><div><h2>桌面项目</h2><p>快捷方式可移入回收站</p></div></div>
+              <strong id="desktopLibraryCount">0</strong>
+            </div>
+            <div class="app-list" id="desktopAppList"></div>
+          </section>
+          <section class="library-pane">
+            <div class="pane-heading">
+              <div><span class="pane-index coral">B</span><div><h2>应用库</h2><p>来自开始菜单与系统应用</p></div></div>
+              <strong id="installedLibraryCount">0</strong>
+            </div>
+            <div class="app-list" id="installedAppList">
+              <div class="list-empty loading-list"><span class="loading-mark"></span><span>等待扫描</span></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="settings">
+        <header class="page-header settings-header">
+          <div>
+            <p class="eyebrow">CONNECTION</p>
+            <h1>接口设置</h1>
+          </div>
+          <span class="privacy-chip"><i data-lucide="shield-check"></i>系统加密存储</span>
+        </header>
+
+        <div class="settings-layout">
+          <form class="settings-form" id="settingsForm">
+            <div class="settings-section-heading">
+              <span>AI 分类服务</span>
+              <h2>OpenAI 兼容接口</h2>
+            </div>
+
+            <label class="field-label" for="endpointInput">请求地址</label>
+            <div class="input-wrap">
+              <i data-lucide="link-2"></i>
+              <input id="endpointInput" name="endpoint" type="url" spellcheck="false" required>
+            </div>
+
+            <div class="field-row">
+              <div>
+                <label class="field-label" for="modelInput">模型</label>
+                <div class="input-wrap">
+                  <i data-lucide="box"></i>
+                  <input id="modelInput" name="model" type="text" spellcheck="false" required>
+                </div>
+              </div>
+              <div>
+                <label class="field-label" for="apiKeyInput">API Key</label>
+                <div class="input-wrap">
+                  <i data-lucide="key-round"></i>
+                  <input id="apiKeyInput" name="apiKey" type="password" spellcheck="false" autocomplete="new-password">
+                  <button class="field-icon-button" id="toggleKeyButton" type="button" title="显示或隐藏 API Key" aria-label="显示或隐藏 API Key"><i data-lucide="eye"></i></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="switch-list">
+              <label class="switch-row">
+                <span><strong>启用 AI 分类</strong><small>整理前由接口判断应用类别</small></span>
+                <input id="useAiInput" type="checkbox"><i></i>
+              </label>
+              <label class="switch-row">
+                <span><strong>本地规则兜底</strong><small>连接失败时仍可继续整理</small></span>
+                <input id="fallbackInput" type="checkbox"><i></i>
+              </label>
+            </div>
+
+            <div class="settings-actions">
+              <button class="secondary-button" id="testApiButton" type="button"><i data-lucide="plug-zap"></i><span>测试连接</span></button>
+              <button class="primary-button" type="submit"><i data-lucide="save"></i><span>保存设置</span></button>
+            </div>
+          </form>
+
+          <aside class="connection-summary">
+            <div class="summary-visual">
+              <span class="summary-line one"></span>
+              <span class="summary-line two"></span>
+              <img src="../assets/app-icon.png" alt="">
+              <div class="provider-node"><i data-lucide="cloud-cog"></i></div>
+            </div>
+            <span class="section-kicker">连接状态</span>
+            <h2 id="connectionTitle">本地模式</h2>
+            <p id="connectionDescription">当前使用内置规则完成应用分类。</p>
+            <dl>
+              <div><dt>密钥</dt><dd id="keyState">未保存</dd></div>
+              <div><dt>失败策略</dt><dd id="fallbackState">本地继续</dd></div>
+              <div><dt>数据范围</dt><dd>仅应用名称</dd></div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop is-hidden" id="modalBackdrop" role="presentation">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-icon" id="modalIcon"><i data-lucide="info"></i></div>
+      <h2 id="modalTitle">确认操作</h2>
+      <p id="modalMessage"></p>
+      <div class="modal-actions">
+        <button class="secondary-button" id="modalCancel" type="button">取消</button>
+        <button class="primary-button" id="modalConfirm" type="button">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+  <script src="../node_modules/lucide/dist/umd/lucide.js"></script>
+  <script src="./renderer.js"></script>
+</body>
+</html>
