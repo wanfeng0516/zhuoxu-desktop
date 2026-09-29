@@ -379,6 +379,30 @@ public static class ZhuoXuDesktopIcons
         return verified;
     }
 
+    private static bool TakeNext(Dictionary<string, Queue<IconPosition>> lookup, string name, out IconPosition item)
+    {
+        Queue<IconPosition> queue;
+        if (!lookup.TryGetValue(name, out queue) || queue.Count == 0)
+        {
+            item = null;
+            return false;
+        }
+        item = queue.Dequeue();
+        return true;
+    }
+
+    private static bool TakeByIndex(Dictionary<int, IconPosition> lookup, HashSet<int> used, int index, string expectedName, out IconPosition item)
+    {
+        if (index < 0 || used.Contains(index) || !lookup.TryGetValue(index, out item)
+            || !String.Equals(item.name, expectedName, StringComparison.CurrentCultureIgnoreCase))
+        {
+            item = null;
+            return false;
+        }
+        used.Add(index);
+        return true;
+    }
+
     private static int[] GetSpacing(IntPtr listView)
     {
         long packed = SendMessage(listView, LVM_GETITEMSPACING, IntPtr.Zero, IntPtr.Zero).ToInt64();
@@ -578,17 +602,26 @@ public static class ZhuoXuDesktopIcons
         }
     }
 
-    public static Result Arrange(object desktop, string[] names, int[] groupSizes, string mode, int appliedIconSize)
+    public static Result Arrange(object desktop, string[] names, int[] shellIndices, int[] groupSizes, string mode, int appliedIconSize)
     {
         try
         {
             IntPtr listView = RequireListView();
             var current = ReadItemsReady(ref listView);
-            var lookup = new Dictionary<string, IconPosition>(StringComparer.CurrentCultureIgnoreCase);
+            var lookup = new Dictionary<string, Queue<IconPosition>>(StringComparer.CurrentCultureIgnoreCase);
             foreach (IconPosition item in current)
             {
-                if (!lookup.ContainsKey(item.name)) lookup.Add(item.name, item);
+                Queue<IconPosition> queue;
+                if (!lookup.TryGetValue(item.name, out queue))
+                {
+                    queue = new Queue<IconPosition>();
+                    lookup.Add(item.name, queue);
+                }
+                queue.Enqueue(item);
             }
+            var byIndex = new Dictionary<int, IconPosition>();
+            foreach (IconPosition item in current) byIndex[item.index] = item;
+            var usedIndices = new HashSet<int>();
 
             int style = GetWindowLong(listView, GWL_STYLE);
             if ((style & LVS_AUTOARRANGE) != 0) SetWindowLong(listView, GWL_STYLE, style & ~LVS_AUTOARRANGE);
@@ -606,31 +639,32 @@ public static class ZhuoXuDesktopIcons
                 int halfWidth = Math.Max(gridX + margin * 2, bounds.width / 2);
                 int maxColumns = Math.Max(1, (halfWidth - margin * 2) / gridX);
                 int maxRows = Math.Max(1, (bounds.height - margin * 2) / gridY);
+                int sideCapacity = maxColumns * maxRows;
+                int totalCapacity = sideCapacity * 2;
+                if (names.Length > totalCapacity)
+                    throw new InvalidOperationException(String.Format("Horizontal layout capacity is {0} icons, but {1} were requested", totalCapacity, names.Length));
                 int itemIndex = 0;
-                int side = 0;
-                int row = 0;
+                int slot = 0;
                 foreach (int rawSize in groupSizes)
                 {
                     int size = Math.Max(0, rawSize);
-                    int neededRows = Math.Max(1, (int)Math.Ceiling(size / (double)maxColumns));
-                    if (side == 0 && row + neededRows > maxRows)
-                    {
-                        side = 1;
-                        row = 0;
-                    }
                     for (int withinGroup = 0; withinGroup < size && itemIndex < names.Length; withinGroup++, itemIndex++)
                     {
                         IconPosition item;
-                        if (!lookup.TryGetValue(names[itemIndex], out item)) continue;
-                        int col = withinGroup % maxColumns;
-                        int localRow = row + withinGroup / maxColumns;
+                        bool matched = shellIndices != null && itemIndex < shellIndices.Length && shellIndices[itemIndex] >= 0
+                            ? TakeByIndex(byIndex, usedIndices, shellIndices[itemIndex], names[itemIndex], out item)
+                            : TakeNext(lookup, names[itemIndex], out item);
+                        if (!matched) continue;
+                        int side = slot / sideCapacity;
+                        int localSlot = slot % sideCapacity;
+                        int col = localSlot % maxColumns;
+                        int localRow = localSlot / maxColumns;
                         int x = margin + side * halfWidth + col * gridX;
                         int y = margin + localRow * gridY;
                         targetItems.Add(item);
                         targetPoints.Add(new POINT { X = x, Y = y });
+                        slot++;
                     }
-                    row += neededRows;
-                    if (side == 1 && row >= maxRows) row = 0;
                 }
             }
             else
@@ -639,7 +673,10 @@ public static class ZhuoXuDesktopIcons
                 for (int i = 0; i < names.Length; i++)
                 {
                     IconPosition item;
-                    if (!lookup.TryGetValue(names[i], out item)) continue;
+                    bool matched = shellIndices != null && i < shellIndices.Length && shellIndices[i] >= 0
+                        ? TakeByIndex(byIndex, usedIndices, shellIndices[i], names[i], out item)
+                        : TakeNext(lookup, names[i], out item);
+                    if (!matched) continue;
                     int x = margin + (i / maxRows) * gridX;
                     int y = margin + (i % maxRows) * gridY;
                     targetItems.Add(item);
@@ -665,17 +702,26 @@ public static class ZhuoXuDesktopIcons
         }
     }
 
-    public static Result Restore(object desktop, string[] names, int[] xs, int[] ys, int appliedIconSize)
+    public static Result Restore(object desktop, string[] names, int[] shellIndices, int[] xs, int[] ys, int appliedIconSize)
     {
         try
         {
             IntPtr listView = RequireListView();
             var current = ReadItemsReady(ref listView);
-            var lookup = new Dictionary<string, IconPosition>(StringComparer.CurrentCultureIgnoreCase);
+            var lookup = new Dictionary<string, Queue<IconPosition>>(StringComparer.CurrentCultureIgnoreCase);
             foreach (IconPosition item in current)
             {
-                if (!lookup.ContainsKey(item.name)) lookup.Add(item.name, item);
+                Queue<IconPosition> queue;
+                if (!lookup.TryGetValue(item.name, out queue))
+                {
+                    queue = new Queue<IconPosition>();
+                    lookup.Add(item.name, queue);
+                }
+                queue.Enqueue(item);
             }
+            var byIndex = new Dictionary<int, IconPosition>();
+            foreach (IconPosition item in current) byIndex[item.index] = item;
+            var usedIndices = new HashSet<int>();
             int style = GetWindowLong(listView, GWL_STYLE);
             if ((style & LVS_AUTOARRANGE) != 0) SetWindowLong(listView, GWL_STYLE, style & ~LVS_AUTOARRANGE);
             var targetItems = new List<IconPosition>();
@@ -683,7 +729,10 @@ public static class ZhuoXuDesktopIcons
             for (int i = 0; i < names.Length && i < xs.Length && i < ys.Length; i++)
             {
                 IconPosition item;
-                if (!lookup.TryGetValue(names[i], out item)) continue;
+                bool matched = shellIndices != null && i < shellIndices.Length && shellIndices[i] >= 0
+                    ? TakeByIndex(byIndex, usedIndices, shellIndices[i], names[i], out item)
+                    : TakeNext(lookup, names[i], out item);
+                if (!matched) continue;
                 targetItems.Add(item);
                 targetPoints.Add(new POINT { X = xs[i], Y = ys[i] });
             }
@@ -861,6 +910,7 @@ try {
         try {
             if ($Action -eq 'arrange') {
                 $names = New-Object System.Collections.Generic.List[string]
+                $shellIndices = New-Object System.Collections.Generic.List[int]
                 $sizes = New-Object System.Collections.Generic.List[int]
                 foreach ($group in @($payload.groups)) {
                     $groupItems = @($group.items)
@@ -876,16 +926,19 @@ try {
                             [string]$item.name
                         }
                         $names.Add($shellName)
+                        $shellIndex = if ($null -ne $item.shellIndex) { [int]$item.shellIndex } else { -1 }
+                        $shellIndices.Add($shellIndex)
                     }
                 }
-                $result = [ZhuoXuDesktopIcons]::Arrange($desktopContext.DesktopDispatch, $names.ToArray(), $sizes.ToArray(), [string]$payload.mode, $appliedIconSize)
+                $result = [ZhuoXuDesktopIcons]::Arrange($desktopContext.DesktopDispatch, $names.ToArray(), $shellIndices.ToArray(), $sizes.ToArray(), [string]$payload.mode, $appliedIconSize)
             }
             else {
                 $items = @($payload.items)
                 [string[]]$names = @($items | ForEach-Object { [string]$_.name })
+                [int[]]$shellIndices = @($items | ForEach-Object { if ($null -ne $_.index) { [int]$_.index } elseif ($null -ne $_.shellIndex) { [int]$_.shellIndex } else { -1 } })
                 [int[]]$xs = @($items | ForEach-Object { [int]$_.x })
                 [int[]]$ys = @($items | ForEach-Object { [int]$_.y })
-                $result = [ZhuoXuDesktopIcons]::Restore($desktopContext.DesktopDispatch, $names, $xs, $ys, $appliedIconSize)
+                $result = [ZhuoXuDesktopIcons]::Restore($desktopContext.DesktopDispatch, $names, $shellIndices, $xs, $ys, $appliedIconSize)
             }
         }
         finally {

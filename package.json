@@ -1,6 +1,6 @@
 {
   "name": "zhuoxu-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "桌序 - Windows 桌面图标整理客户端",
   "main": "main.js",
   "author": "ZhuoXu contributors",
@@ -8,7 +8,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check lib/windows-desktop.js && node --check src/renderer.js",
+    "test": "node --test test/quality.test.js",
+    "check": "node --check main.js && node --check preload.js && node --check lib/windows-desktop.js && node --check src/renderer.js && npm test",
     "dist": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target nsis",
     "dist:portable": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target portable",
     "release:prepare": "npm run dist && powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/package-release.ps1",

@@ -15,6 +15,7 @@ const state = {
   display: { width: 1920, height: 1080, workAreaWidth: 1920, workAreaHeight: 1040, scaleFactor: 1 },
   iconSize: 48,
   currentIconSize: 48,
+  layoutBusy: false,
   settings: null,
   dragType: '',
   draggedItemId: '',
@@ -61,6 +62,13 @@ function iconElement(name) {
 
 function normalizedName(value) {
   return String(value || '').trim().toLocaleLowerCase('zh-CN');
+}
+
+function applicationIdentity(item) {
+  if (item?.appId) return `appx:${String(item.appId).toLocaleLowerCase('en-US')}`;
+  if (item?.targetPath) return `target:${String(item.targetPath).toLocaleLowerCase('en-US')}`;
+  if (item?.identity) return String(item.identity).toLocaleLowerCase('en-US');
+  return '';
 }
 
 function normalizeIconSize(value) {
@@ -250,26 +258,21 @@ function previewPositions(groups, width, height) {
   const halfWidth = Math.max(cellWidth + margin * 2, width / 2);
   const columns = Math.max(1, Math.floor((halfWidth - margin * 2) / cellWidth));
   const maxRows = Math.max(1, Math.floor((height - margin * 2) / cellHeight));
-  let side = 0;
-  let row = 0;
+  const sideCapacity = columns * maxRows;
+  let slot = 0;
   groups.forEach((group) => {
     if (!group.items.length) return;
-    const neededRows = Math.max(1, Math.ceil(group.items.length / columns));
-    if (side === 0 && row + neededRows > maxRows) {
-      side = 1;
-      row = 0;
-    }
-    group.items.forEach((item, index) => {
-      const localRow = row + Math.floor(index / columns);
+    group.items.forEach((item) => {
+      const side = Math.floor(slot / sideCapacity);
+      const localSlot = slot % sideCapacity;
       positions.push({
         item,
         color: group.color,
-        x: margin + side * halfWidth + (index % columns) * cellWidth,
-        y: margin + localRow * cellHeight
+        x: margin + side * halfWidth + (localSlot % columns) * cellWidth,
+        y: margin + Math.floor(localSlot / columns) * cellHeight
       });
+      slot += 1;
     });
-    row += neededRows;
-    if (side === 1 && row >= maxRows) row = 0;
   });
   return positions;
 }
@@ -428,7 +431,8 @@ function renderCategoryOrder() {
 
 function renderHistory() {
   const count = state.historyCount;
-  elements.undoButton.disabled = count === 0 || !state.desktopAvailable;
+  elements.arrangeButton.disabled = state.layoutBusy || !state.desktopAvailable;
+  elements.undoButton.disabled = state.layoutBusy || count === 0 || !state.desktopAvailable;
   elements.undoLabel.textContent = count ? `撤销 · ${count}` : '撤销';
   elements.historyNote.textContent = count ? `已有 ${count}/3 份布局备份` : '暂无布局备份';
 }
@@ -480,10 +484,11 @@ function createAppRow(item, installed = false) {
 
 function libraryItems() {
   const query = normalizedName(elements.librarySearch.value);
-  const desktopNames = new Set(state.desktop.map((item) => normalizedName(item.name)));
+  const desktopIdentities = new Set(state.desktop.map(applicationIdentity).filter(Boolean));
   const desktop = state.desktop.filter((item) => !query || normalizedName(`${item.name} ${item.targetPath}`).includes(query));
   const available = (state.installed || []).filter((item) => {
-    if (desktopNames.has(normalizedName(item.name))) return false;
+    const identity = applicationIdentity(item);
+    if (identity && desktopIdentities.has(identity)) return false;
     return !query || normalizedName(`${item.name} ${item.targetPath}`).includes(query);
   });
   return { desktop, available };
@@ -653,51 +658,68 @@ async function arrangeDesktop() {
   });
   if (!confirmed) return;
 
-  await withBusy(elements.arrangeButton, async () => {
-    try {
-      const groups = groupedDesktop().map((group) => ({
-        id: group.id,
-        label: group.label,
-        items: group.items.map((item) => ({
-          name: item.name,
-          fileName: item.fileName || item.name,
-          shellName: item.shellName || item.fileName || item.name
-        }))
-      }));
-      const result = await api.arrange({ mode: state.mode, iconSize: state.iconSize, groups });
-      state.display = result.display || state.display;
-      state.historyCount = result.historyCount;
-      state.currentIconSize = Number(result.iconSize) || state.iconSize;
-      state.iconSize = normalizeIconSize(state.currentIconSize);
-      state.settings = { ...(state.settings || {}), iconSize: state.iconSize };
-      renderSizeControl();
-      renderHistory();
-      showToast(`已按 ${state.currentIconSize}px 整理 ${result.moved || 0} 个桌面图标。`);
-      await refreshOverview(false);
-    } catch (error) {
-      showToast(errorMessage(error), 'error');
-    }
-  });
+  state.layoutBusy = true;
+  renderHistory();
+  try {
+    await withBusy(elements.arrangeButton, async () => {
+      try {
+        const groups = groupedDesktop().map((group) => ({
+          id: group.id,
+          label: group.label,
+          items: group.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            fileName: item.fileName || item.name,
+            shellName: item.shellName || item.fileName || item.name,
+            shellIndex: Number.isInteger(item.shellIndex) ? item.shellIndex : -1
+          }))
+        }));
+        const result = await api.arrange({ mode: state.mode, iconSize: state.iconSize, groups });
+        state.display = result.display || state.display;
+        state.historyCount = result.historyCount;
+        state.currentIconSize = Number(result.iconSize) || state.iconSize;
+        state.iconSize = normalizeIconSize(state.currentIconSize);
+        state.settings = { ...(state.settings || {}), iconSize: state.iconSize };
+        renderSizeControl();
+        renderHistory();
+        showToast(`已按 ${state.currentIconSize}px 整理 ${result.moved || 0} 个桌面图标。`);
+        await refreshOverview(false);
+      } catch (error) {
+        await refreshOverview(false).catch(() => {});
+        showToast(errorMessage(error), 'error');
+      }
+    });
+  } finally {
+    state.layoutBusy = false;
+    renderHistory();
+  }
 }
 
 async function undoLayout() {
-  await withBusy(elements.undoButton, async () => {
-    try {
-      const result = await api.undo();
-      state.historyCount = result.historyCount;
-      if (result.iconSize) {
-        state.iconSize = normalizeIconSize(result.iconSize);
-        state.currentIconSize = Number(result.iconSize);
-        await api.saveIconSize(state.iconSize);
-        renderSizeControl();
+  state.layoutBusy = true;
+  renderHistory();
+  try {
+    await withBusy(elements.undoButton, async () => {
+      try {
+        const result = await api.undo();
+        state.historyCount = result.historyCount;
+        if (result.iconSize) {
+          state.iconSize = normalizeIconSize(result.iconSize);
+          state.currentIconSize = Number(result.iconSize);
+          await api.saveIconSize(state.iconSize);
+          renderSizeControl();
+        }
+        renderHistory();
+        showToast(`已恢复 ${result.moved || 0} 个图标的位置。`);
+        await refreshOverview(false);
+      } catch (error) {
+        showToast(errorMessage(error), 'error');
       }
-      renderHistory();
-      showToast(`已恢复 ${result.moved || 0} 个图标的位置。`);
-      await refreshOverview(false);
-    } catch (error) {
-      showToast(errorMessage(error), 'error');
-    }
-  });
+    });
+  } finally {
+    state.layoutBusy = false;
+    renderHistory();
+  }
 }
 
 async function resetManualCategories() {

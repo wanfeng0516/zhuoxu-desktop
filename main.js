@@ -1,10 +1,37 @@
 const { app, BrowserWindow, ipcMain, safeStorage, shell, screen } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const WindowsDesktop = require('./lib/windows-desktop');
 
 let mainWindow;
 let desktop;
+let desktopOperation = Promise.resolve();
+let settingsOperation = Promise.resolve();
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
+function enqueueDesktopOperation(operation) {
+  const next = desktopOperation.then(operation, operation);
+  desktopOperation = next.catch(() => {});
+  return next;
+}
+
+function enqueueSettingsOperation(operation) {
+  const next = settingsOperation.then(operation, operation);
+  settingsOperation = next.catch(() => {});
+  return next;
+}
 
 const DEFAULT_SETTINGS = {
   endpoint: 'https://api.openai.com/v1/chat/completions',
@@ -39,14 +66,31 @@ function categoryOverridesPath() {
 async function readJson(filePath, fallback) {
   try {
     return JSON.parse(await fs.readFile(filePath, 'utf8'));
-  } catch {
-    return fallback;
+  } catch (error) {
+    if (error.code === 'ENOENT') return fallback;
+    if (error instanceof SyntaxError) {
+      throw new Error(`数据文件损坏：${path.basename(filePath)}。请先备份后删除该文件，再重新启动应用。`);
+    }
+    throw error;
   }
 }
 
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
+  const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  const content = `${JSON.stringify(value, null, 2)}\n`;
+  try {
+    const handle = await fs.open(temporaryPath, 'w');
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temporaryPath, filePath);
+  } finally {
+    await fs.unlink(temporaryPath).catch(() => {});
+  }
 }
 
 async function readSettings() {
@@ -74,33 +118,37 @@ function publicSettings(settings) {
 }
 
 async function saveSettings(input) {
-  const current = await readSettings();
-  const next = {
-    ...current,
-    endpoint: String(input.endpoint || '').trim(),
-    model: String(input.model || '').trim(),
-    useAi: Boolean(input.useAi),
-    localFallback: input.localFallback !== false
-  };
+  return enqueueSettingsOperation(async () => {
+    const current = await readSettings();
+    const next = {
+      ...current,
+      endpoint: String(input.endpoint || '').trim(),
+      model: String(input.model || '').trim(),
+      useAi: Boolean(input.useAi),
+      localFallback: input.localFallback !== false
+    };
 
-  if (input.clearApiKey) {
-    next.encryptedApiKey = '';
-  } else if (input.apiKey) {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('当前系统无法使用 Windows 安全存储。');
+    if (input.clearApiKey) {
+      next.encryptedApiKey = '';
+    } else if (input.apiKey) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('当前系统无法使用 Windows 安全存储。');
+      }
+      next.encryptedApiKey = safeStorage.encryptString(String(input.apiKey)).toString('base64');
     }
-    next.encryptedApiKey = safeStorage.encryptString(String(input.apiKey)).toString('base64');
-  }
 
-  await writeJson(settingsPath(), next);
-  return publicSettings(next);
+    await writeJson(settingsPath(), next);
+    return publicSettings(next);
+  });
 }
 
 async function saveIconSize(iconSize) {
-  const settings = await readSettings();
-  settings.iconSize = normalizeIconSize(iconSize);
-  await writeJson(settingsPath(), settings);
-  return { iconSize: settings.iconSize };
+  return enqueueSettingsOperation(async () => {
+    const settings = await readSettings();
+    settings.iconSize = normalizeIconSize(iconSize);
+    await writeJson(settingsPath(), settings);
+    return { iconSize: settings.iconSize };
+  });
 }
 
 function getDisplayInfo() {
@@ -357,6 +405,27 @@ async function getOverview() {
   };
 }
 
+function validateArrangePayload(payload, snapshot) {
+  const byShellIndex = new Map(
+    (snapshot.items || [])
+      .filter((item) => Number.isInteger(item.shellIndex) && item.shellIndex >= 0)
+      .map((item) => [item.shellIndex, item])
+  );
+  for (const group of Array.isArray(payload?.groups) ? payload.groups : []) {
+    for (const item of Array.isArray(group?.items) ? group.items : []) {
+      const shellIndex = Number(item.shellIndex);
+      if (!Number.isInteger(shellIndex) || shellIndex < 0) {
+        throw new Error('桌面项目缺少稳定标识，请重新扫描桌面后再试。');
+      }
+      const current = byShellIndex.get(shellIndex);
+      const shellName = String(item.shellName || item.fileName || item.name || '');
+      if (!current || current.id !== item.id || current.shellName !== shellName) {
+        throw new Error('桌面项目在整理前发生了变化，请重新扫描桌面后再试。');
+      }
+    }
+  }
+}
+
 function installIpcHandlers() {
   ipcMain.handle('app:overview', getOverview);
   ipcMain.handle('desktop:refresh', getOverview);
@@ -381,13 +450,23 @@ function installIpcHandlers() {
     ], 30);
     return { ok: true, response: content.slice(0, 120) };
   });
-  ipcMain.handle('layout:arrange', async (_event, payload) => {
+  ipcMain.handle('layout:arrange', (_event, payload) => enqueueDesktopOperation(async () => {
     const windowBounds = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null;
     const wasMaximized = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized());
     const wasFullScreen = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFullScreen());
     const display = getDisplayInfo();
-    const before = await desktop.captureLayout();
-    if (!before.items?.length) throw new Error('未能读取桌面图标，请确认 Windows Explorer 正在运行。');
+    const current = await desktop.getDesktopSnapshot({ withIcons: false });
+    if (!current.desktopAvailable || !current.items?.length) throw new Error('未能读取桌面图标，请确认 Windows Explorer 正在运行。');
+    validateArrangePayload(payload, current);
+    const before = {
+      ...current,
+      items: current.items.map((item) => ({
+        name: item.shellName || item.name,
+        index: Number.isInteger(item.index) ? item.index : -1,
+        x: item.x,
+        y: item.y
+      }))
+    };
     const historyCount = await pushHistory(before);
     try {
       const result = await desktop.arrangeLayout({
@@ -397,9 +476,27 @@ function installIpcHandlers() {
       await saveIconSize(result.iconSize);
       return { ...result, historyCount, display };
     } catch (error) {
-      const history = await loadHistory();
-      history.pop();
-      await writeJson(historyPath(), history);
+      let restored = false;
+      let restoreError;
+      try {
+        const rollback = await desktop.restoreLayout(before);
+        await saveIconSize(rollback.iconSize || before.iconSize);
+        restored = true;
+      } catch (errorDuringRestore) {
+        restoreError = errorDuringRestore;
+      }
+
+      if (restored) {
+        const history = await loadHistory();
+        history.pop();
+        await writeJson(historyPath(), history);
+      } else {
+        console.error('桌面排列失败，自动恢复也失败；保留布局备份供用户撤销。', restoreError);
+      }
+
+      if (restoreError) {
+        throw new Error(`${error.message} 原布局未能自动恢复，布局备份已保留，请立即尝试撤销。`);
+      }
       throw error;
     } finally {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -408,15 +505,15 @@ function installIpcHandlers() {
         else if (!wasFullScreen && !wasMaximized && windowBounds) mainWindow.setBounds(windowBounds, false);
       }
     }
-  });
-  ipcMain.handle('layout:undo', async () => {
+  }));
+  ipcMain.handle('layout:undo', () => enqueueDesktopOperation(async () => {
     const history = await loadHistory();
     if (!history.length) throw new Error('没有可撤销的桌面布局。');
     const snapshot = history.pop();
     const result = await desktop.restoreLayout(snapshot);
     await writeJson(historyPath(), history);
     return { ...result, historyCount: history.length };
-  });
+  }));
   ipcMain.handle('shell:open-external', async (_event, url) => {
     if (!/^https?:\/\//i.test(url)) throw new Error('只允许打开 HTTP 链接。');
     await shell.openExternal(url);
@@ -450,14 +547,16 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show());
 }
 
-app.whenReady().then(() => {
-  desktop = new WindowsDesktop({ app, shell, baseDir: __dirname });
-  installIpcHandlers();
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (hasSingleInstanceLock) {
+  app.whenReady().then(() => {
+    desktop = new WindowsDesktop({ app, shell, baseDir: __dirname });
+    installIpcHandlers();
+    createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
+}
 
 app.on('window-all-closed', () => app.quit());
 

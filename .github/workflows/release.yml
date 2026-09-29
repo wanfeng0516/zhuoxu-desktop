@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run quality checks
+        run: npm run check
+
       - name: Verify tag and package version
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
