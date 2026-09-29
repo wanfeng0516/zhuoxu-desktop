@@ -33,3 +33,6 @@ desktop.ini
 *.temp
 *.bak
 *.zip
+
+# Local development notes
+软件开发目的.txt
