@@ -42,6 +42,9 @@ const DEFAULT_SETTINGS = {
   encryptedApiKey: ''
 };
 
+const API_TEST_TIMEOUT_MS = 20_000;
+const API_CLASSIFICATION_TIMEOUT_MS = 120_000;
+
 const ICON_SIZE_MIN = 32;
 const ICON_SIZE_MAX = 96;
 
@@ -175,24 +178,35 @@ function normalizeEndpoint(endpoint) {
   return `${clean}/v1/chat/completions`;
 }
 
-async function requestChat(settings, apiKey, messages, maxTokens = 500) {
-  const response = await fetch(normalizeEndpoint(settings.endpoint), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: settings.model,
-      messages,
-      temperature: 0.1,
-      max_tokens: maxTokens,
-      response_format: { type: 'json_object' }
-    }),
-    signal: AbortSignal.timeout(20000)
-  });
+async function requestChat(settings, apiKey, messages, maxTokens = 500, timeoutMs = API_CLASSIFICATION_TIMEOUT_MS) {
+  let response;
+  let raw;
+  try {
+    response = await fetch(normalizeEndpoint(settings.endpoint), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: settings.model,
+        messages,
+        temperature: 0.1,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' }
+      }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    // The model may send headers quickly and then take much longer to finish
+    // the JSON body. Keep response.text() under the same timeout as fetch().
+    raw = await response.text();
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      throw new Error(`API 请求超过 ${Math.round(timeoutMs / 1000)} 秒仍未返回，请检查接口地址、模型响应速度或网络连接。`);
+    }
+    throw error;
+  }
 
-  const raw = await response.text();
   if (!response.ok) {
     let detail = raw;
     try {
@@ -356,7 +370,7 @@ ${categoryGuide}
   ];
 
   try {
-    const content = await requestChat(settings, apiKey, messages, 900);
+    const content = await requestChat(settings, apiKey, messages, 900, API_CLASSIFICATION_TIMEOUT_MS);
     return finalize(parseClassification(content, items), 'ai');
   } catch (error) {
     if (settings.localFallback) {
@@ -400,6 +414,7 @@ async function getOverview() {
     historyCount: history.length,
     desktopAvailable: snapshot.desktopAvailable,
     bounds: snapshot.bounds,
+    grid: snapshot.grid,
     display: getDisplayInfo(),
     currentIconSize: snapshot.iconSize
   };
@@ -447,7 +462,7 @@ function installIpcHandlers() {
     const content = await requestChat(settings, apiKey, [
       { role: 'system', content: '返回 JSON：{"status":"ok"}' },
       { role: 'user', content: '测试连接' }
-    ], 30);
+    ], 30, API_TEST_TIMEOUT_MS);
     return { ok: true, response: content.slice(0, 120) };
   });
   ipcMain.handle('layout:arrange', (_event, payload) => enqueueDesktopOperation(async () => {

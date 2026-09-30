@@ -10,7 +10,8 @@
     "start": "electron .",
     "test": "node --test test/quality.test.js",
     "check": "node --check main.js && node --check preload.js && node --check lib/windows-desktop.js && node --check src/renderer.js && npm test",
-    "dist": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target nsis",
+    "dist": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target all",
+    "dist:setup": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target nsis",
     "dist:portable": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target portable",
     "release:prepare": "npm run dist && powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/package-release.ps1",
     "release:verify": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-release.ps1"

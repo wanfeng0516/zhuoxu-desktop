@@ -155,6 +155,10 @@ public static class ZhuoXuDesktopIcons
         public List<IconPosition> items { get; set; }
         public Bounds bounds { get; set; }
         public int iconSize { get; set; }
+        public int gridX { get; set; }
+        public int gridY { get; set; }
+        public int originX { get; set; }
+        public int originY { get; set; }
     }
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -197,26 +201,45 @@ public static class ZhuoXuDesktopIcons
 
     private static IntPtr FindListView()
     {
-        IntPtr progman = FindWindow("Progman", "Program Manager");
-        IntPtr shellView = FindWindowEx(progman, IntPtr.Zero, "SHELLDLL_DefView", null);
-        if (shellView == IntPtr.Zero)
+        // The desktop window title is localized and can change after Explorer
+        // restarts. The class name is stable, so do not require a title.
+        IntPtr progman = FindWindow("Progman", null);
+        IntPtr shellView = FindDescendant(progman, "SHELLDLL_DefView");
+        IntPtr listView = shellView == IntPtr.Zero
+            ? IntPtr.Zero
+            : FindDescendant(shellView, "SysListView32");
+        if (listView != IntPtr.Zero) return listView;
+
+        discoveredView = IntPtr.Zero;
+        EnumWindows(delegate(IntPtr window, IntPtr unused)
         {
-            discoveredView = IntPtr.Zero;
-            EnumWindows(delegate(IntPtr window, IntPtr unused)
+            IntPtr candidate = FindDescendant(window, "SHELLDLL_DefView");
+            if (candidate != IntPtr.Zero)
             {
-                IntPtr candidate = FindWindowEx(window, IntPtr.Zero, "SHELLDLL_DefView", null);
-                if (candidate != IntPtr.Zero)
+                IntPtr candidateListView = FindDescendant(candidate, "SysListView32");
+                if (candidateListView != IntPtr.Zero)
                 {
-                    discoveredView = candidate;
+                    discoveredView = candidateListView;
                     return false;
                 }
-                return true;
-            }, IntPtr.Zero);
-            shellView = discoveredView;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return discoveredView;
+    }
+
+    private static IntPtr FindDescendant(IntPtr parent, string className)
+    {
+        if (parent == IntPtr.Zero) return IntPtr.Zero;
+        IntPtr child = FindWindowEx(parent, IntPtr.Zero, className, null);
+        if (child != IntPtr.Zero) return child;
+        child = IntPtr.Zero;
+        while ((child = FindWindowEx(parent, child, null, null)) != IntPtr.Zero)
+        {
+            IntPtr nested = FindDescendant(child, className);
+            if (nested != IntPtr.Zero) return nested;
         }
-        return shellView == IntPtr.Zero
-            ? IntPtr.Zero
-            : FindWindowEx(shellView, IntPtr.Zero, "SysListView32", "FolderView");
+        return IntPtr.Zero;
     }
 
     private static Bounds GetBounds(IntPtr listView)
@@ -330,7 +353,9 @@ public static class ZhuoXuDesktopIcons
             folderObject = Marshal.GetObjectForIUnknown(folderPointer);
             var folder = (IFolderView2)folderObject;
 
-            result = folder.SetCurrentFolderFlags(FWF_AUTOARRANGE | FWF_SNAPTOGRID, 0);
+            // Keep automatic placement disabled so the requested order is respected,
+            // while leaving Explorer's snap-to-grid behavior enabled for every item.
+            result = folder.SetCurrentFolderFlags(FWF_AUTOARRANGE | FWF_SNAPTOGRID, FWF_SNAPTOGRID);
             if (result != 0) Marshal.ThrowExceptionForHR(result);
 
             int pointSize = Marshal.SizeOf(typeof(POINT));
@@ -379,6 +404,21 @@ public static class ZhuoXuDesktopIcons
         return verified;
     }
 
+    private static int WaitForPositions(ref IntPtr listView, List<IconPosition> expectedItems, List<POINT> expectedPoints, int toleranceX, int toleranceY, out List<IconPosition> actual)
+    {
+        actual = new List<IconPosition>();
+        int best = 0;
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            if (attempt > 0) Thread.Sleep(150);
+            actual = ReadItemsReady(ref listView);
+            int verified = VerifyPositions(actual, expectedItems, expectedPoints, toleranceX, toleranceY);
+            if (verified > best) best = verified;
+            if (verified == expectedItems.Count) return verified;
+        }
+        return best;
+    }
+
     private static bool TakeNext(Dictionary<string, Queue<IconPosition>> lookup, string name, out IconPosition item)
     {
         Queue<IconPosition> queue;
@@ -406,9 +446,34 @@ public static class ZhuoXuDesktopIcons
     private static int[] GetSpacing(IntPtr listView)
     {
         long packed = SendMessage(listView, LVM_GETITEMSPACING, IntPtr.Zero, IntPtr.Zero).ToInt64();
-        int x = (int)(packed & 0xFFFF);
-        int y = (int)((packed >> 16) & 0xFFFF);
+        // LVM_GETITEMSPACING returns two signed 16-bit values. Without sign
+        // extension a negative/invalid response becomes a huge grid size.
+        int x = (short)(packed & 0xFFFF);
+        int y = (short)((packed >> 16) & 0xFFFF);
         return new[] { x > 30 ? x : 82, y > 30 ? y : 86 };
+    }
+
+    private static int GetGridOrigin(List<IconPosition> items, int spacing, bool horizontal)
+    {
+        if (spacing <= 0 || items.Count == 0) return 0;
+        var counts = new Dictionary<int, int>();
+        int bestOrigin = 0;
+        int bestCount = 0;
+        foreach (IconPosition item in items)
+        {
+            int value = horizontal ? item.x : item.y;
+            int origin = ((value % spacing) + spacing) % spacing;
+            int count;
+            counts.TryGetValue(origin, out count);
+            count++;
+            counts[origin] = count;
+            if (count > bestCount)
+            {
+                bestCount = count;
+                bestOrigin = origin;
+            }
+        }
+        return bestOrigin;
     }
 
     private static int GetIconSize(IntPtr listView)
@@ -451,16 +516,21 @@ public static class ZhuoXuDesktopIcons
 
     private static IntPtr WaitForListView()
     {
+        Exception lastError = null;
+        bool sawListView = false;
+        bool sawItems = false;
         for (int attempt = 0; attempt < 80; attempt++)
         {
             IntPtr listView = FindListView();
             if (listView != IntPtr.Zero && IsWindow(listView))
             {
+                sawListView = true;
                 uint processId;
                 uint threadId = GetWindowThreadProcessId(listView, out processId);
                 int itemCount = SendMessage(listView, LVM_GETITEMCOUNT, IntPtr.Zero, IntPtr.Zero).ToInt32();
                 if (threadId != 0 && processId != 0 && itemCount > 0)
                 {
+                    sawItems = true;
                     IntPtr process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE, false, processId);
                     if (process != IntPtr.Zero)
                     {
@@ -472,15 +542,23 @@ public static class ZhuoXuDesktopIcons
                             IntPtr confirmed = FindListView();
                             if (confirmed == listView && IsWindow(confirmed)) return confirmed;
                         }
-                        catch
+                        catch (Exception error)
                         {
-                            // Explorer is still replacing the desktop list view.
+                            // Explorer can briefly replace the desktop list view.
+                            lastError = error;
                         }
+                    }
+                    else
+                    {
+                        lastError = new Win32Exception(Marshal.GetLastWin32Error(), "Unable to open the desktop process");
                     }
                 }
             }
             Thread.Sleep(50);
         }
+        if (lastError != null) throw new InvalidOperationException(String.Format("Windows desktop icon view was not ready: {0}", lastError.Message));
+        if (sawItems) throw new InvalidOperationException("Windows desktop process could not be opened");
+        if (sawListView) throw new InvalidOperationException("Windows desktop icon list is empty or not ready");
         throw new InvalidOperationException("Windows desktop icon view was not found after changing icon size");
     }
 
@@ -594,7 +672,19 @@ public static class ZhuoXuDesktopIcons
         try
         {
             IntPtr listView = RequireListView();
-            return new Result { ok = true, items = ReadItems(listView), bounds = GetBounds(listView), iconSize = GetIconSize(listView) };
+            var items = ReadItems(listView);
+            int[] spacing = GetSpacing(listView);
+            return new Result
+            {
+                ok = true,
+                items = items,
+                bounds = GetBounds(listView),
+                iconSize = GetIconSize(listView),
+                gridX = spacing[0],
+                gridY = spacing[1],
+                originX = GetGridOrigin(items, spacing[0], true),
+                originY = GetGridOrigin(items, spacing[1], false)
+            };
         }
         catch (Exception error)
         {
@@ -630,24 +720,39 @@ public static class ZhuoXuDesktopIcons
             int[] spacing = GetSpacing(listView);
             int gridX = spacing[0];
             int gridY = spacing[1];
-            int margin = 18;
+            // Explorer's desktop grid does not necessarily start at a fixed
+            // pixel margin. Reuse the dominant grid origin from the current
+            // icon positions so snap-to-grid does not relocate our targets.
+            int originX = GetGridOrigin(current, gridX, true);
+            int originY = GetGridOrigin(current, gridY, false);
             var targetItems = new List<IconPosition>();
             var targetPoints = new List<POINT>();
 
             if (String.Equals(mode, "horizontal", StringComparison.OrdinalIgnoreCase))
             {
-                int halfWidth = Math.Max(gridX + margin * 2, bounds.width / 2);
-                int maxColumns = Math.Max(1, (halfWidth - margin * 2) / gridX);
-                int maxRows = Math.Max(1, (bounds.height - margin * 2) / gridY);
-                int sideCapacity = maxColumns * maxRows;
-                int totalCapacity = sideCapacity * 2;
+                // Horizontal groups occupy only the left half of the desktop.
+                // Start at the first desktop row instead of inheriting an old
+                // grid offset, which could leave a large blank strip on top.
+                int horizontalOriginX = 0;
+                int horizontalOriginY = 0;
+                int horizontalWidth = Math.Max(gridX, bounds.width / 2);
+                int maxColumns = Math.Max(1, horizontalWidth / gridX);
+                int maxRows = Math.Max(1, bounds.height / gridY);
+                int totalCapacity = maxColumns * maxRows;
                 if (names.Length > totalCapacity)
                     throw new InvalidOperationException(String.Format("Horizontal layout capacity is {0} icons, but {1} were requested", totalCapacity, names.Length));
+
                 int itemIndex = 0;
-                int slot = 0;
+                int column = 0;
+                int row = 0;
                 foreach (int rawSize in groupSizes)
                 {
                     int size = Math.Max(0, rawSize);
+                    if (size > 0 && column != 0)
+                    {
+                        row++;
+                        column = 0;
+                    }
                     for (int withinGroup = 0; withinGroup < size && itemIndex < names.Length; withinGroup++, itemIndex++)
                     {
                         IconPosition item;
@@ -655,21 +760,24 @@ public static class ZhuoXuDesktopIcons
                             ? TakeByIndex(byIndex, usedIndices, shellIndices[itemIndex], names[itemIndex], out item)
                             : TakeNext(lookup, names[itemIndex], out item);
                         if (!matched) continue;
-                        int side = slot / sideCapacity;
-                        int localSlot = slot % sideCapacity;
-                        int col = localSlot % maxColumns;
-                        int localRow = localSlot / maxColumns;
-                        int x = margin + side * halfWidth + col * gridX;
-                        int y = margin + localRow * gridY;
+                        if (row >= maxRows)
+                            throw new InvalidOperationException(String.Format("Horizontal layout capacity is {0} icons, but {1} were requested", totalCapacity, names.Length));
+                        int x = horizontalOriginX + column * gridX;
+                        int y = horizontalOriginY + row * gridY;
                         targetItems.Add(item);
                         targetPoints.Add(new POINT { X = x, Y = y });
-                        slot++;
+                        column++;
+                        if (column >= maxColumns)
+                        {
+                            column = 0;
+                            row++;
+                        }
                     }
                 }
             }
             else
             {
-                int maxRows = Math.Max(1, (bounds.height - margin * 2) / gridY);
+                int maxRows = Math.Max(1, (bounds.height - originY) / gridY);
                 for (int i = 0; i < names.Length; i++)
                 {
                     IconPosition item;
@@ -677,8 +785,8 @@ public static class ZhuoXuDesktopIcons
                         ? TakeByIndex(byIndex, usedIndices, shellIndices[i], names[i], out item)
                         : TakeNext(lookup, names[i], out item);
                     if (!matched) continue;
-                    int x = margin + (i / maxRows) * gridX;
-                    int y = margin + (i % maxRows) * gridY;
+                    int x = originX + (i / maxRows) * gridX;
+                    int y = originY + (i % maxRows) * gridY;
                     targetItems.Add(item);
                     targetPoints.Add(new POINT { X = x, Y = y });
                 }
@@ -687,14 +795,22 @@ public static class ZhuoXuDesktopIcons
             if (targetItems.Count != names.Length)
                 throw new InvalidOperationException(String.Format("Only {0} of {1} desktop icons could be matched", targetItems.Count, names.Length));
             PositionItems(desktop, targetItems, targetPoints);
-            Thread.Sleep(250);
             InvalidateRect(listView, IntPtr.Zero, true);
             UpdateWindow(listView);
-            var arranged = ReadItemsReady(ref listView);
-            int moved = VerifyPositions(arranged, targetItems, targetPoints, Math.Max(2, gridX / 2), Math.Max(2, gridY / 2));
+            List<IconPosition> arranged;
+            int moved = WaitForPositions(ref listView, targetItems, targetPoints, Math.Max(2, gridX / 2), Math.Max(2, gridY / 2), out arranged);
+            if (moved != targetItems.Count)
+            {
+                // Explorer may defer a large batch while it updates its view.
+                // Re-submit once, then wait for the final snapped positions.
+                PositionItems(desktop, targetItems, targetPoints);
+                InvalidateRect(listView, IntPtr.Zero, true);
+                UpdateWindow(listView);
+                moved = WaitForPositions(ref listView, targetItems, targetPoints, Math.Max(2, gridX / 2), Math.Max(2, gridY / 2), out arranged);
+            }
             if (moved != targetItems.Count)
                 throw new InvalidOperationException(String.Format("Windows applied {0} of {1} desktop icon positions", moved, targetItems.Count));
-            return new Result { ok = true, moved = moved, requested = names.Length, matched = targetItems.Count, items = arranged, bounds = bounds, iconSize = appliedIconSize };
+            return new Result { ok = true, moved = moved, requested = names.Length, matched = targetItems.Count, items = arranged, bounds = bounds, iconSize = appliedIconSize, gridX = gridX, gridY = gridY, originX = originX, originY = originY };
         }
         catch (Exception error)
         {
@@ -739,11 +855,10 @@ public static class ZhuoXuDesktopIcons
             if (targetItems.Count != names.Length)
                 throw new InvalidOperationException(String.Format("Only {0} of {1} desktop icons could be matched for restore", targetItems.Count, names.Length));
             PositionItems(desktop, targetItems, targetPoints);
-            Thread.Sleep(250);
             InvalidateRect(listView, IntPtr.Zero, true);
             UpdateWindow(listView);
-            var restored = ReadItemsReady(ref listView);
-            int moved = VerifyPositions(restored, targetItems, targetPoints, 2, 2);
+            List<IconPosition> restored;
+            int moved = WaitForPositions(ref listView, targetItems, targetPoints, 2, 2, out restored);
             if (moved != targetItems.Count)
                 throw new InvalidOperationException(String.Format("Windows restored {0} of {1} desktop icon positions", moved, targetItems.Count));
             return new Result { ok = true, moved = moved, requested = names.Length, matched = targetItems.Count, items = restored, bounds = GetBounds(listView), iconSize = appliedIconSize };

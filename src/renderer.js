@@ -12,6 +12,7 @@ const state = {
   manualOverrideCount: 0,
   desktopAvailable: false,
   bounds: { width: 1920, height: 1080 },
+  grid: { x: 82, y: 86, originX: 0, originY: 0 },
   display: { width: 1920, height: 1080, workAreaWidth: 1920, workAreaHeight: 1040, scaleFactor: 1 },
   iconSize: 48,
   currentIconSize: 48,
@@ -77,17 +78,51 @@ function normalizeIconSize(value) {
   return Math.min(ICON_SIZE_MAX, Math.max(ICON_SIZE_MIN, Math.round(parsed)));
 }
 
-function previewMetrics() {
+function estimatedDesktopGrid() {
+  const currentSize = normalizeIconSize(state.currentIconSize || 48);
+  const targetSize = normalizeIconSize(state.iconSize);
+  const sizeDelta = targetSize - currentSize;
+  return {
+    x: Math.max(40, (Number(state.grid?.x) || currentSize + 34) + sizeDelta),
+    y: Math.max(44, (Number(state.grid?.y) || currentSize + 38) + sizeDelta)
+  };
+}
+
+function horizontalLayoutGrid(width, height) {
+  const desktopWidth = Math.max(1, Number(state.bounds?.width) || Number(state.display?.workAreaWidth) || 1920);
+  const desktopHeight = Math.max(1, Number(state.bounds?.height) || Number(state.display?.workAreaHeight) || 1040);
+  const grid = estimatedDesktopGrid();
+  const columns = Math.max(1, Math.floor((desktopWidth / 2) / grid.x));
+  const rows = Math.max(1, Math.floor(desktopHeight / grid.y));
+  return {
+    columns,
+    rows,
+    cellWidth: Math.max(18, Math.floor((width / 2) / columns)),
+    cellHeight: Math.max(22, Math.floor(height / rows))
+  };
+}
+
+function previewMetrics(width = elements.desktopPreview?.clientWidth || 0, height = elements.desktopPreview?.clientHeight || 0) {
   const scale = Math.min(1.75, Math.max(0.72, state.iconSize / 48));
-  const icon = Math.round(28 * scale);
-  const itemWidth = Math.max(40, Math.round(48 * scale));
-  const itemHeight = icon + Math.max(15, Math.round(17 * scale));
+  let icon = Math.round(28 * scale);
+  let itemWidth = Math.max(40, Math.round(48 * scale));
+  let itemHeight = icon + Math.max(15, Math.round(17 * scale));
+  let cellWidth = itemWidth + Math.max(1, Math.round(scale));
+  let cellHeight = itemHeight + Math.max(1, Math.round(scale));
+  if (state.mode === 'horizontal' && width > 0 && height > 0) {
+    const layout = horizontalLayoutGrid(width, height);
+    cellWidth = layout.cellWidth;
+    cellHeight = layout.cellHeight;
+    itemWidth = Math.max(16, cellWidth - 1);
+    itemHeight = Math.max(20, cellHeight - 1);
+    icon = Math.max(11, Math.min(itemWidth - 2, itemHeight - 12, Math.round(itemWidth * 0.72)));
+  }
   return {
     icon,
     itemWidth,
     itemHeight,
-    cellWidth: itemWidth + Math.max(1, Math.round(scale)),
-    cellHeight: itemHeight + Math.max(1, Math.round(scale)),
+    cellWidth,
+    cellHeight,
     labelSize: Math.min(10, Math.max(7, Math.round(8 * Math.sqrt(scale))))
   };
 }
@@ -242,7 +277,7 @@ function buildPreviewIcon(item, color) {
 
 function previewPositions(groups, width, height) {
   const margin = 12;
-  const { cellWidth, cellHeight } = previewMetrics();
+  const { cellWidth, cellHeight } = previewMetrics(width, height);
   const positions = [];
 
   if (state.mode === 'left') {
@@ -255,23 +290,27 @@ function previewPositions(groups, width, height) {
     return positions;
   }
 
-  const halfWidth = Math.max(cellWidth + margin * 2, width / 2);
-  const columns = Math.max(1, Math.floor((halfWidth - margin * 2) / cellWidth));
-  const maxRows = Math.max(1, Math.floor((height - margin * 2) / cellHeight));
-  const sideCapacity = columns * maxRows;
-  let slot = 0;
+  const columns = horizontalLayoutGrid(width, height).columns;
+  let column = 0;
+  let row = 0;
   groups.forEach((group) => {
     if (!group.items.length) return;
+    if (column !== 0) {
+      row += 1;
+      column = 0;
+    }
     group.items.forEach((item) => {
-      const side = Math.floor(slot / sideCapacity);
-      const localSlot = slot % sideCapacity;
       positions.push({
         item,
         color: group.color,
-        x: margin + side * halfWidth + (localSlot % columns) * cellWidth,
-        y: margin + Math.floor(localSlot / columns) * cellHeight
+        x: column * cellWidth,
+        y: row * cellHeight
       });
-      slot += 1;
+      column += 1;
+      if (column >= columns) {
+        column = 0;
+        row += 1;
+      }
     });
   });
   return positions;
@@ -626,10 +665,13 @@ async function refreshOverview(showSuccess = true) {
   state.manualOverrideCount = result.manualOverrideCount || 0;
   state.desktopAvailable = Boolean(result.desktopAvailable);
   state.bounds = result.bounds || state.bounds;
+  state.grid = result.grid || state.grid;
   state.display = result.display || state.display;
   state.settings = result.settings || state.settings;
-  state.iconSize = normalizeIconSize(result.settings?.iconSize ?? state.iconSize);
   state.currentIconSize = Number(result.currentIconSize) || state.currentIconSize;
+  // Explorer is the source of truth; the saved target can be stale when the
+  // user changes the desktop size with Ctrl+wheel outside this app.
+  state.iconSize = normalizeIconSize(state.currentIconSize || result.settings?.iconSize || state.iconSize);
   state.categories = previousOrder.length
     ? previousOrder.map((id) => result.categories.find((category) => category.id === id)).filter(Boolean)
     : result.categories;
@@ -849,10 +891,11 @@ async function init() {
     state.manualOverrideCount = overview.manualOverrideCount || 0;
     state.desktopAvailable = Boolean(overview.desktopAvailable);
     state.bounds = overview.bounds || state.bounds;
+    state.grid = overview.grid || state.grid;
     state.settings = overview.settings;
     state.display = overview.display || state.display;
-    state.iconSize = normalizeIconSize(overview.settings?.iconSize ?? overview.currentIconSize);
     state.currentIconSize = Number(overview.currentIconSize) || state.iconSize;
+    state.iconSize = normalizeIconSize(state.currentIconSize || overview.settings?.iconSize || state.iconSize);
     setNotice(overview.warning || (!overview.desktopAvailable ? '未连接到 Windows 桌面图标视图。预览与应用管理仍可使用，但暂时不能执行排列。' : ''));
     renderOrganize();
     populateSettings();
