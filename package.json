@@ -1,6 +1,6 @@
 {
   "name": "zhuoxu-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "桌序 - Windows 桌面图标整理客户端",
   "main": "main.js",
   "author": "ZhuoXu contributors",
@@ -10,9 +10,8 @@
     "start": "electron .",
     "test": "node --test test/quality.test.js",
     "check": "node --check main.js && node --check preload.js && node --check lib/windows-desktop.js && node --check src/renderer.js && npm test",
-    "dist": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target all",
+    "dist": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target nsis",
     "dist:setup": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target nsis",
-    "dist:portable": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Target portable",
     "release:prepare": "npm run dist && powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/package-release.ps1",
     "release:verify": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/validate-release.ps1"
   },
@@ -71,9 +70,6 @@
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "menuCategory": false
-    },
-    "portable": {
-      "artifactName": "ZhuoXu-Portable-${version}-${arch}.${ext}"
     }
   }
 }

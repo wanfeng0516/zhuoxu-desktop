@@ -1,6 +1,6 @@
 param(
-    [ValidateSet('all', 'nsis', 'portable')]
-    [string]$Target = 'all'
+    [ValidateSet('nsis')]
+    [string]$Target = 'nsis'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,22 +18,19 @@ try {
     & npm.cmd run check
     if ($LASTEXITCODE -ne 0) { throw "Static checks failed with exit code $LASTEXITCODE" }
 
-    $targets = if ($Target -eq 'all') { @('nsis', 'portable') } else { @($Target) }
-    foreach ($buildTarget in $targets) {
-        $buildSucceeded = $false
-        for ($attempt = 1; $attempt -le 3; $attempt += 1) {
-            & $builder --win $buildTarget --x64 --publish never
-            if ($LASTEXITCODE -eq 0) {
-                $buildSucceeded = $true
-                break
-            }
-            if ($attempt -lt 3) {
-                Write-Warning "electron-builder failed for $buildTarget on attempt $attempt. Retrying with the local cache..."
-                Start-Sleep -Seconds 3
-            }
+    $buildSucceeded = $false
+    for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+        & $builder --win $Target --x64 --publish never
+        if ($LASTEXITCODE -eq 0) {
+            $buildSucceeded = $true
+            break
         }
-        if (-not $buildSucceeded) { throw "electron-builder failed for $buildTarget after 3 attempts." }
+        if ($attempt -lt 3) {
+            Write-Warning "electron-builder failed for $Target on attempt $attempt. Retrying with the local cache..."
+            Start-Sleep -Seconds 3
+        }
     }
+    if (-not $buildSucceeded) { throw "electron-builder failed for $Target after 3 attempts." }
 }
 finally {
     Pop-Location

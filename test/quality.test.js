@@ -86,11 +86,13 @@ test('release workflow runs the quality gate before packaging', () => {
   assert.match(workflow, /run: npm run check/);
 });
 
-test('default distribution build creates setup and portable executables', () => {
+test('distribution build creates only the setup installer', () => {
   const packageJson = JSON.parse(read('package.json'));
   const buildScript = read('scripts/build-installer.ps1');
-  assert.match(packageJson.scripts.dist, /-Target all/);
+  assert.match(packageJson.scripts.dist, /-Target nsis/);
   assert.match(packageJson.scripts['dist:setup'], /-Target nsis/);
-  assert.match(packageJson.scripts['dist:portable'], /-Target portable/);
-  assert.match(buildScript, /@\('nsis', 'portable'\)/);
+  assert.equal(packageJson.scripts['dist:portable'], undefined);
+  assert.equal(packageJson.build.portable, undefined);
+  assert.match(buildScript, /ValidateSet\('nsis'\)/);
+  assert.doesNotMatch(buildScript, /portable/i);
 });
