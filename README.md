@@ -8,17 +8,17 @@
 - 横向分组：同类图标横向排列，并根据当前显示器尺寸自动换行与分区。
 - 手动分类：在预览中拖动图标，调整分类结果。
 - 布局恢复：每次整理前自动备份，可撤销最近 3 次操作。
-- 图标尺寸：每次整理时重新读取当前屏幕尺寸，并应用用户选择的图标大小。
+- 图标尺寸：提供 Windows 原生“小、中、大、超大”四档图标大小，并在整理时重新读取当前屏幕尺寸。
 - 应用管理：扫描开始菜单和系统应用，添加或移除桌面快捷方式。
 - AI 分类：支持 OpenAI 兼容的 `chat/completions` 接口；API Key 使用 Windows 安全存储加密。
 
 ## 安装
 
-1. 从 GitHub Releases 下载 `ZhuoXu-Setup-<版本>-x64.zip`。
-2. 解压 ZIP，运行其中的 `ZhuoXu-Setup-<版本>-x64.exe`。
+1. 下载 `ZhuoXu-Setup-0.1.3-x64.zip`。
+2. 解压 ZIP，运行其中的 `ZhuoXu-Setup-0.1.3-x64.exe`。
 3. 选择安装目录并完成安装。安装器会创建桌面与开始菜单快捷方式。
 
-当前安装包没有代码签名证书。Windows SmartScreen 可能显示“未知发布者”，可在确认文件来自本项目 Release 后选择“更多信息”继续运行。Release 同时提供 `SHA256SUMS.txt` 用于校验文件完整性。
+当前安装包没有代码签名证书。Windows SmartScreen 可能显示“未知发布者”，确认文件来源后可选择“更多信息”继续运行。`SHA256SUMS.txt` 可用于校验文件完整性。
 
 ## 系统要求
 
@@ -62,16 +62,6 @@ npm run release:prepare
 ```powershell
 npm run release:verify
 ```
-
-## 发布 GitHub Release
-
-仓库包含 `.github/workflows/release.yml`。推送形如 `v0.1.1` 的标签后，GitHub Actions 会在 Windows 环境构建并发布以下文件：
-
-- `ZhuoXu-Setup-0.1.1-x64.exe`
-- `ZhuoXu-Setup-0.1.1-x64.zip`
-- `SHA256SUMS.txt`
-
-发布标签应与 `package.json` 中的版本一致。
 
 ## 隐私与安全
 
