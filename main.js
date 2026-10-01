@@ -45,13 +45,14 @@ const DEFAULT_SETTINGS = {
 const API_TEST_TIMEOUT_MS = 20_000;
 const API_CLASSIFICATION_TIMEOUT_MS = 120_000;
 
-const ICON_SIZE_MIN = 32;
-const ICON_SIZE_MAX = 96;
+const WINDOWS_ICON_SIZES = [32, 48, 96, 128];
 
 function normalizeIconSize(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 48;
-  return Math.min(ICON_SIZE_MAX, Math.max(ICON_SIZE_MIN, Math.round(parsed)));
+  return WINDOWS_ICON_SIZES.reduce((nearest, size) => (
+    Math.abs(size - parsed) < Math.abs(nearest - parsed) ? size : nearest
+  ), WINDOWS_ICON_SIZES[0]);
 }
 
 function settingsPath() {

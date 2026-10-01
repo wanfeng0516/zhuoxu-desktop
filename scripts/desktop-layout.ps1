@@ -923,7 +923,8 @@ try {
     }
 
     function Set-DesktopIconSize([int]$RequestedSize) {
-        $target = [Math]::Max(32, [Math]::Min(96, $RequestedSize))
+        $nativeSizes = @(32, 48, 96, 128)
+        $target = [int]($nativeSizes | Sort-Object { [Math]::Abs($_ - $RequestedSize) } | Select-Object -First 1)
         $current = Get-DesktopIconSize
         $best = $current
         $bestDistance = [Math]::Abs($target - $current)

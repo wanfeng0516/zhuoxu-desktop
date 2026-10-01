@@ -1,6 +1,6 @@
 const api = window.zhuoxu;
-const ICON_SIZE_MIN = 32;
-const ICON_SIZE_MAX = 96;
+const WINDOWS_ICON_SIZES = [32, 48, 96, 128];
+const WINDOWS_ICON_LABELS = ['小', '中', '大', '超大'];
 
 const state = {
   view: 'organize',
@@ -75,7 +75,19 @@ function applicationIdentity(item) {
 function normalizeIconSize(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 48;
-  return Math.min(ICON_SIZE_MAX, Math.max(ICON_SIZE_MIN, Math.round(parsed)));
+  return WINDOWS_ICON_SIZES.reduce((nearest, size) => (
+    Math.abs(size - parsed) < Math.abs(nearest - parsed) ? size : nearest
+  ), WINDOWS_ICON_SIZES[0]);
+}
+
+function iconSizeIndex(value) {
+  const normalized = normalizeIconSize(value);
+  return Math.max(0, WINDOWS_ICON_SIZES.indexOf(normalized));
+}
+
+function iconSizeLabel(value) {
+  const index = iconSizeIndex(value);
+  return `${WINDOWS_ICON_LABELS[index]} · ${WINDOWS_ICON_SIZES[index]} px`;
 }
 
 function estimatedDesktopGrid() {
@@ -387,9 +399,10 @@ function renderManualState() {
 function renderSizeControl() {
   const iconSize = normalizeIconSize(state.iconSize);
   state.iconSize = iconSize;
-  elements.iconSizeSlider.value = String(iconSize);
-  elements.iconSizeSlider.style.setProperty('--range-progress', `${((iconSize - ICON_SIZE_MIN) / (ICON_SIZE_MAX - ICON_SIZE_MIN)) * 100}%`);
-  elements.iconSizeValue.textContent = `${iconSize} px`;
+  const index = iconSizeIndex(iconSize);
+  elements.iconSizeSlider.value = String(index);
+  elements.iconSizeSlider.style.setProperty('--range-progress', `${(index / (WINDOWS_ICON_SIZES.length - 1)) * 100}%`);
+  elements.iconSizeValue.textContent = iconSizeLabel(iconSize);
 
   const display = state.display || {};
   const width = Number(display.width) || Number(state.bounds.width) || 1920;
@@ -809,7 +822,8 @@ function bindEvents() {
   elements.undoButton.addEventListener('click', undoLayout);
   elements.resetCategoriesButton.addEventListener('click', resetManualCategories);
   elements.iconSizeSlider.addEventListener('input', () => {
-    state.iconSize = normalizeIconSize(elements.iconSizeSlider.value);
+    const index = Math.max(0, Math.min(WINDOWS_ICON_SIZES.length - 1, Number(elements.iconSizeSlider.value)));
+    state.iconSize = WINDOWS_ICON_SIZES[index];
     renderSizeControl();
     renderPreview();
   });

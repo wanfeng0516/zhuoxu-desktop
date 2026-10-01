@@ -201,6 +201,8 @@ button { color: inherit; }
 .icon-size-control input[type="range"]::-webkit-slider-thumb { width: 16px; height: 16px; margin-top: -6px; appearance: none; border: 2px solid #fff; border-radius: 50%; background: var(--teal); box-shadow: 0 1px 5px rgba(29,84,73,.3); transition: transform .15s, box-shadow .15s; }
 .icon-size-control input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); box-shadow: 0 2px 8px rgba(29,84,73,.34); }
 .icon-size-control input[type="range"]:focus-visible { outline: 2px solid rgba(30,138,120,.35); outline-offset: 4px; border-radius: 3px; }
+.size-levels { grid-column: 2; display: flex; justify-content: space-between; margin-top: -2px; color: var(--muted); font-size: 9px; line-height: 1; }
+.size-levels span { min-width: 0; }
 .screen-readout { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; min-height: 24px; padding-top: 4px; border-top: 1px solid var(--line); color: #4d5955; font: 600 10px/1 "Bahnschrift", sans-serif; }
 .screen-readout svg { width: 13px; color: var(--teal); }
 .screen-readout small { margin-left: auto; color: var(--muted); font: 500 9px/1 "Bahnschrift", sans-serif; }

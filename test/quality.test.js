@@ -53,6 +53,14 @@ test('desktop arrangement keeps snap-to-grid and category row boundaries', () =>
 
 test('desktop icon size display follows Explorer current size', () => {
   const renderer = read('src/renderer.js');
+  const html = read('src/index.html');
+  const main = read('main.js');
+  const layout = read('scripts/desktop-layout.ps1');
+  assert.match(renderer, /WINDOWS_ICON_SIZES = \[32, 48, 96, 128\]/);
+  assert.match(renderer, /WINDOWS_ICON_LABELS = \['小', '中', '大', '超大'\]/);
+  assert.match(main, /WINDOWS_ICON_SIZES = \[32, 48, 96, 128\]/);
+  assert.match(layout, /\$nativeSizes = @\(32, 48, 96, 128\)/);
+  assert.match(html, /type="range" min="0" max="3" step="1"/);
   assert.match(renderer, /state\.currentIconSize \|\| result\.settings\?\.iconSize/);
   assert.match(renderer, /state\.currentIconSize \|\| overview\.settings\?\.iconSize/);
 });

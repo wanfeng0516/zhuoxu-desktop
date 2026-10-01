@@ -114,12 +114,15 @@
             <div class="control-heading size-heading">
               <span class="step-number">02</span>
               <div><span>屏幕适配</span><strong>图标尺寸</strong></div>
-              <output class="size-output" id="iconSizeValue" for="iconSizeSlider">48 px</output>
+              <output class="size-output" id="iconSizeValue" for="iconSizeSlider">中 · 48 px</output>
             </div>
             <div class="icon-size-control">
               <i data-lucide="minimize-2" aria-hidden="true"></i>
-              <input id="iconSizeSlider" type="range" min="32" max="96" step="1" value="48" aria-label="桌面图标尺寸">
+              <input id="iconSizeSlider" type="range" min="0" max="3" step="1" value="1" aria-label="桌面图标尺寸">
               <i data-lucide="maximize-2" aria-hidden="true"></i>
+              <div class="size-levels" aria-hidden="true">
+                <span>小</span><span>中</span><span>大</span><span>超大</span>
+              </div>
               <div class="screen-readout" title="当前显示器尺寸">
                 <i data-lucide="monitor"></i>
                 <span id="screenResolution">正在读取</span>
